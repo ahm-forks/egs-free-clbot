@@ -1,0 +1,66 @@
+name: EFC
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * 4"
+
+jobs:
+  EFC:
+    name: Claim Freebie
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Setup Python 3
+        uses: actions/setup-python@v2
+      - name: Install Apprise
+        run: pip3 --no-cache-dir install apprise==0.9.6
+
+      - name: Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Prepare cache
+        uses: actions/cache@v2
+        id:   egs-deps-cache
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-npm-
+          path: node_modules
+
+      - name: Install dependencies
+        if: ${{ ! steps.egs-deps-cache.outputs.cache-hit }}
+        run: npm install
+
+      - name: Setup data folder
+        run: printf "$DATA" > data/device_auths.json
+        env:
+          DATA: ${{ secrets.EG_AUTH_JSON }}
+
+      - name: Setup config file
+        run: printf "$DATA" > data/config.json
+        env:
+          DATA: ${{ secrets.EG_CONFIG_JSON }}
+
+      - name: Claim
+        run: |
+          curl --fail -Ls https://github.com/ahm-forks/egs-free-clbot/raw/log/claimer.log -o claimer.log || :
+          stdbuf -i0 -o0 -e0 npm start \
+          | stdbuf -i0 -o0 -e0 sed -E 's/[0-9a-z.-]+@[0-9a-z.-]+/user@host/g;' \
+          | stdbuf -i0 -o0 -e0 sed -E '/Logged/{/in as/s/[a-zA-Z0-9]+ \([a-z0-9]+\)/user/;/out of/s/[a-zA-Z0-9]+ out/user out/}'
+
+      - name: Scrub logs
+        run: |
+          mkdir logs
+          sed -Ei 's/[0-9a-z.-]+@[0-9a-z.-]+/user@host/g;' claimer.log || :
+          sed -Ei '/Logged/{/in as/s/[a-zA-Z0-9]+ \([a-z0-9]+\)/user/;/out of/s/[a-zA-Z0-9]+ out/user out/}' claimer.log || :
+          mv claimer.log logs/
+
+      - name: Publish log
+        uses: crazy-max/ghaction-github-pages@v2.5.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          build_dir: logs
+          target_branch: log
